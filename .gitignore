@@ -1,0 +1,56 @@
+# Virtual environments
+.venv/
+venv/
+env/
+__pypackages__/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+.env.*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.next/
+frontend/out/
+node_modules/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# AI Assistants
+.claude/
+
+# Runtime data (SQLite db, downloaded PDFs, generated config)
+data/
+
+# Databases
+*.sqlite3
+*.db
+
+# Streamlit / Web apps
+.streamlit/
