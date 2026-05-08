@@ -14,8 +14,9 @@ import shutil
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from mcp.server.fastmcp import FastMCP
 
-from . import coordinator
+from . import coordinator, mcp_tools
 from .config_store import config_mtime, get_config, save_config, validate_startup_config
 from .store import (
     flag_hits_by_announcement,
@@ -28,6 +29,28 @@ from .store import (
 from .logger import backend_logger, frontend_logger
 
 app = FastAPI(title="BSE Scraper API")
+
+# ─── MCP Server ───────────────────────────────────────────────────────────────
+
+mcp = FastMCP("BSE-Data-Server")
+
+@mcp.tool()
+def list_announcements():
+    """List recent BSE announcements/filings."""
+    return mcp_tools.list_announcements_tool()
+
+@mcp.tool()
+async def start_quick_run(days: int = 7):
+    """Start a Quick Run (Scraper + Processor) for the last N days."""
+    return await mcp_tools.start_quick_run_tool(days)
+
+@mcp.tool()
+def get_system_status():
+    """Check the current status of background jobs."""
+    return mcp_tools.get_system_status_tool()
+
+# Mount MCP SSE app
+app.mount("/mcp", mcp.sse_app())
 
 
 @app.on_event("startup")

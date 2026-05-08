@@ -520,6 +520,7 @@ async def _load_candidates(
 
             raw_attachment = str(a.get("ATTACHMENTNAME") or a.get("NSURL") or "").strip()
             company_name = str(
+                a.get("SLONGNAME") or a.get("LONG_NAME") or
                 a.get("COMPANY_NAME") or a.get("Scrip_Name") or a.get("Scripname") or
                 a.get("ScripName") or a.get("scrip_name") or a.get("Company") or
                 a.get("company_name") or ""
