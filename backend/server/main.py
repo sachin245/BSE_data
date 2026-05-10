@@ -46,7 +46,11 @@ def _validate_config_on_startup() -> None:
 async def log_requests(request: Request, call_next):
     backend_logger.info(f"Incoming request: {request.method} {request.url.path}")
     response = await call_next(request)
-    backend_logger.info(f"Completed request: {request.method} {request.url.path} - Status: {response.status_code}")
+    content_type = response.headers.get("content-type", "unknown")
+    backend_logger.info(
+        f"Completed request: {request.method} {request.url.path} - "
+        f"Status: {response.status_code} - Type: {content_type}"
+    )
     return response
 
 # ─── Config ──────────────────────────────────────────────────────────────────
@@ -116,6 +120,7 @@ def api_run_stop():
 
 @app.get("/api/announcements")
 def api_announcements():
+    backend_logger.info("Handling /api/announcements")
     rows = list_announcements()
     hits = flag_hits_by_announcement()
     tag_hits = scrape_tag_hits_by_announcement()
@@ -203,12 +208,19 @@ def api_get_logs(source: str = "backend", limit: int = 100):
         return JSONResponse(status_code=500, content={"error": f"Failed to read logs: {e}"})
 
 
+@app.get("/api/{_path:path}", include_in_schema=False)
+def api_fallback(_path: str):
+    """Catch-all for unmatched /api routes to prevent falling through to SPA fallback."""
+    backend_logger.warning(f"Unmatched API route hit: /api/{_path}")
+    return JSONResponse(status_code=404, content={"error": "API route not found"})
+
+
 # ─── SPA fallback (production) ────────────────────────────────────────────────
 
-_dist = "dist"
+_dist = "frontend/dist"  # Correct path relative to project root
 backend_logger.info(f"Checking for dist at: {os.path.abspath(_dist)}")
 if os.path.isdir(_dist):
-    backend_logger.info(f"Dist found. Listing contents: {os.listdir(_dist)}")
+    backend_logger.info(f"Dist found at {_dist}. Listing contents: {os.listdir(_dist)}")
     _assets = os.path.join(_dist, "assets")
     if os.path.isdir(_assets):
         app.mount("/assets", StaticFiles(directory=_assets), name="assets")

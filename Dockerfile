@@ -1,33 +1,36 @@
-# Use Python base image
+# --- Stage 1: Build Frontend ---
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: Final Image ---
 FROM python:3.12-slim
-
-# Install Node.js
-RUN apt-get update && apt-get install -y \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python deps
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy python requirements and install
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy frontend and build
-COPY frontend ./frontend
-WORKDIR /app/frontend
-RUN npm install && npm run build
+# Copy the built frontend from Stage 1
+# backend/server/main.py expects it at "frontend/dist"
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Move dist to root
-WORKDIR /app
-RUN mv frontend/dist ./dist
-
-# Copy the rest of the app
+# Copy the rest of the application
 COPY . .
 
-# Expose port
+# Ensure start.sh is executable
+RUN chmod +x start.sh
+
+# Expose the default port
 EXPOSE 8000
 
-# Start command
-CMD ["sh", "start.sh"]
+# Start the application
+CMD ["./start.sh"]
