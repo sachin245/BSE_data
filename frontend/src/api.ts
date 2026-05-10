@@ -173,4 +173,7 @@ export const api = {
   startQuickRun: (payload: Record<string, unknown>) =>
     postJson<ScraperStatus>('/api/quickrun/start', payload),
   stopRun: () => postJson<RunStatus>('/api/run/stop', {}),
+  fetchLogs: (source: string = 'backend', limit: number = 100) =>
+    getJson<{ logs: string[] }>(`/api/logs?source=${source}&limit=${limit}`),
 }
+

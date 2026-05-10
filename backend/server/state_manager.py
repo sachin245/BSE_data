@@ -64,6 +64,9 @@ class EngineState:
             msg: Message to log
             level: Log level ('info', 'warn', or 'err')
         """
+        prefix = f"[{self._name.upper()}] "
+        full_msg = prefix + msg
+
         # Write to file logger
         if level == "err":
             self._logger.error(msg)
@@ -74,7 +77,7 @@ class EngineState:
 
         # Add to state log (for UI display)
         ts = datetime.now().strftime("%H:%M:%S")
-        self._state["log"].append({"ts": ts, "msg": msg, "level": level})
+        self._state["log"].append({"ts": ts, "msg": full_msg, "level": level})
 
         # Trim log if it exceeds max size
         if len(self._state["log"]) > self._log_max_entries:

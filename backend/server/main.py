@@ -14,9 +14,8 @@ import shutil
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from mcp.server.fastmcp import FastMCP
 
-from . import coordinator, mcp_tools
+from . import coordinator
 from .config_store import config_mtime, get_config, save_config, validate_startup_config
 from .store import (
     flag_hits_by_announcement,
@@ -29,29 +28,6 @@ from .store import (
 from .logger import backend_logger, frontend_logger
 
 app = FastAPI(title="BSE Scraper API")
-
-# ─── MCP Server ───────────────────────────────────────────────────────────────
-
-mcp = FastMCP("BSE-Data-Server")
-
-@mcp.tool()
-def list_announcements():
-    """List recent BSE announcements/filings."""
-    return mcp_tools.list_announcements_tool()
-
-@mcp.tool()
-async def start_quick_run(days: int = 7):
-    """Start a Quick Run (Scraper + Processor) for the last N days."""
-    return await mcp_tools.start_quick_run_tool(days)
-
-@mcp.tool()
-def get_system_status():
-    """Check the current status of background jobs."""
-    return mcp_tools.get_system_status_tool()
-
-# Mount MCP SSE app
-app.mount("/mcp", mcp.sse_app())
-
 
 @app.on_event("startup")
 def _validate_config_on_startup() -> None:
@@ -207,12 +183,32 @@ async def api_receive_frontend_logs(request: Request):
         frontend_logger.info(msg)
         
     return JSONResponse(status_code=200, content={"status": "logged"})
+@app.get("/api/logs")
+def api_get_logs(source: str = "backend", limit: int = 100):
+    """Retrieve the last N lines of a log file."""
+    valid_sources = ["backend", "streamlit", "frontend"]
+    if source not in valid_sources:
+        return JSONResponse(status_code=400, content={"error": f"Invalid source. Must be one of {valid_sources}"})
+    
+    log_file = f"logs/{source}.log"
+    if not os.path.exists(log_file):
+        return JSONResponse(status_code=200, content={"logs": []})
+    
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            # Efficiently get last N lines
+            lines = f.readlines()
+            return {"logs": lines[-limit:] if limit > 0 else lines}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to read logs: {e}"})
 
 
 # ─── SPA fallback (production) ────────────────────────────────────────────────
 
 _dist = "dist"
+backend_logger.info(f"Checking for dist at: {os.path.abspath(_dist)}")
 if os.path.isdir(_dist):
+    backend_logger.info(f"Dist found. Listing contents: {os.listdir(_dist)}")
     _assets = os.path.join(_dist, "assets")
     if os.path.isdir(_assets):
         app.mount("/assets", StaticFiles(directory=_assets), name="assets")

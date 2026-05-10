@@ -210,6 +210,7 @@ async def _run() -> None:
                     break
 
                 try:
+                    _state.log(f"Extracting text from record {rec['id']}...")
                     text = await _extract_text(rec["attachment_path"], rec["attachment_url"], client)
                     hits = 0
                     s = _state.get()
@@ -225,6 +226,7 @@ async def _run() -> None:
                             )
                             snippet = re.sub(r"\s+", " ", snippet).strip()
                             insert_flag_hit(rec["id"], flag["name"], snippet)
+                            _state.log(f"  - Hit: {flag['name']}")
                             hits += 1
 
                     s = _state.get()

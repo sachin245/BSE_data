@@ -468,15 +468,17 @@ async def _load_candidates(
         except re.error:
             _state.log(f'tag "{t["label"]}" has invalid pattern — skipped', "warn")
 
-    scrips = [""] if universe else list(wl)
+    # Always fetch from all scrips (empty string) — no watchlist filtering
+    scrips = [""]
     _state.update(totalPages=len(scrips), pagesDone=0)
-    _state.log(f"Fetching BSE feed for {len(scrips)} scrip(s) in range {from_date} → {to_date}…")
+    _state.log(f"Fetching BSE feed for all scrips in range {from_date} → {to_date}…")
 
     out = []
     for i, scrip in enumerate(scrips):
         if _state.get()["_cancelRequested"]:
             break
 
+        _state.log(f"Fetching scrip {scrip or 'all'} ({i+1}/{len(scrips)})")
         rows = await _fetch_bse_page(scrip, from_bse, to_bse, settings)
         s = _state.get()
         _state.update(
@@ -493,8 +495,7 @@ async def _load_candidates(
 
         for a in rows:
             scrip_code = str(a.get("SCRIP_CD") or "").strip()
-            if not universe and watchlist_only and scrip_code not in wl:
-                continue
+            # Accept all scrips — no watchlist filtering
 
             dt = _bse_date_to_dt(str(a.get("News_submission_dt") or ""))
             if dt is None or dt < from_dt or dt > to_dt:

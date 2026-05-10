@@ -258,6 +258,12 @@ def reset_run_history() -> None:
         db.execute("DELETE FROM run_history")
 
 
+def reset_settings() -> None:
+    db = get_db()
+    with db:
+        db.execute("DELETE FROM settings_kv")
+
+
 def settings_kv_set(key: str, value) -> None:
     db = get_db()
     with db:

@@ -15,7 +15,7 @@ def get_app_logger(name: str, log_filename: str) -> logging.Logger:
         file_handler = logging.FileHandler(f"logs/{log_filename}", encoding="utf-8")
         file_handler.setLevel(logging.INFO)
         
-        formatter = logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - [%(filename)s:%(lineno)d] - %(funcName)s - %(message)s')
         file_handler.setFormatter(formatter)
         
         logger.addHandler(file_handler)
