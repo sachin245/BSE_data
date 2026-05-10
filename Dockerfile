@@ -16,8 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy python requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Using the backend/requirements.txt to be safe
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r ./requirements.txt
 
 # Copy the built frontend from Stage 1
 # backend/server/main.py expects it at "frontend/dist"
