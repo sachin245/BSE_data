@@ -121,6 +121,7 @@ def upsert_announcements_batch(records: list) -> None:
                     r.get("processedAt") or None, r.get("rawJson") or None, now,
                 ),
             )
+            db.execute("DELETE FROM scrape_tag_hits WHERE announcement_id = ?", (r["id"],))
             for h in r.get("matchedTags", []):
                 db.execute(
                     """INSERT INTO scrape_tag_hits

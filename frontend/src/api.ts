@@ -139,10 +139,24 @@ export class ApiError extends Error {
   }
 }
 
+async function apiErrorMessage(res: Response, path: string): Promise<string> {
+  const fallback = `${res.status} ${res.statusText} - ${path}`
+  const contentType = res.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) return fallback
+
+  try {
+    const body = (await res.json()) as { error?: unknown; detail?: unknown }
+    const message = body.error ?? body.detail
+    return typeof message === 'string' && message.trim() ? message : fallback
+  } catch {
+    return fallback
+  }
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { Accept: 'application/json' } })
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText} — ${path}`)
+    throw new ApiError(res.status, await apiErrorMessage(res, path))
   }
   return (await res.json()) as T
 }
@@ -154,7 +168,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body ?? {}),
   })
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText} — ${path}`)
+    throw new ApiError(res.status, await apiErrorMessage(res, path))
   }
   return (await res.json()) as T
 }
@@ -176,4 +190,3 @@ export const api = {
   fetchLogs: (source: string = 'backend', limit: number = 100) =>
     getJson<{ logs: string[] }>(`/api/logs?source=${source}&limit=${limit}`),
 }
-

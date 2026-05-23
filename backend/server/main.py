@@ -177,15 +177,20 @@ async def api_reset(request: Request):
 @app.post("/api/logs")
 async def api_receive_frontend_logs(request: Request):
     body = await _json_body(request)
-    level = body.get("level", "INFO").upper()
-    msg = body.get("message", "No message provided")
-    
-    if level == "ERROR":
-        frontend_logger.error(msg)
-    elif level in ["WARN", "WARNING"]:
-        frontend_logger.warning(msg)
-    else:
-        frontend_logger.info(msg)
+
+    entries = body if isinstance(body, list) else [body]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        level = str(entry.get("level", "INFO")).upper()
+        msg = str(entry.get("message", "No message provided"))
+
+        if level == "ERROR":
+            frontend_logger.error(msg)
+        elif level in ["WARN", "WARNING"]:
+            frontend_logger.warning(msg)
+        else:
+            frontend_logger.info(msg)
         
     return JSONResponse(status_code=200, content={"status": "logged"})
 @app.get("/api/logs")

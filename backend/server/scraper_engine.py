@@ -337,9 +337,26 @@ async def _download_one(
         _state.log(f"pdf error — {rec['id']}: {e}", "err")
 
 
-async def _fetch_bse_page(scrip: str, from_date: str, to_date: str, settings: dict) -> list:
+def _announcement_key(row: dict) -> str:
+    news_id = row.get("NEWSID")
+    if news_id:
+        return str(news_id)
+    return "|".join(
+        str(row.get(k) or "")
+        for k in ("SCRIP_CD", "News_submission_dt", "NEWSSUB", "ATTACHMENTNAME", "NSURL")
+    )
+
+
+async def _fetch_bse_page(
+    scrip: str,
+    from_date: str,
+    to_date: str,
+    settings: dict,
+    page_no: int = 1,
+) -> list:
     """Fetch one page of announcements from BSE API."""
     params = {
+        "pageno": str(page_no),
         "strCat": "-1",
         "strPrevDate": from_date,
         "strScrip": scrip,
@@ -371,7 +388,7 @@ async def _fetch_bse_page(scrip: str, from_date: str, to_date: str, settings: di
             if r.status_code in (429, 503):
                 wait = min(backoff_max, backoff_min * (2 ** attempt))
                 _state.log(
-                    f"HTTP {r.status_code} (scrip {scrip or 'all'}) — backoff {wait}s", "warn"
+                    f"HTTP {r.status_code} (scrip {scrip or 'all'}, page {page_no}) — backoff {wait}s", "warn"
                 )
                 if r.status_code == 429:
                     _state.get_all()["http429s"] = _state.get()["http429s"] + 1
@@ -381,7 +398,10 @@ async def _fetch_bse_page(scrip: str, from_date: str, to_date: str, settings: di
                 continue
 
             if not r.is_success:
-                _state.log(f"BSE API {r.status_code} for scrip \"{scrip or 'all'}\"", "warn")
+                _state.log(
+                    f'BSE API {r.status_code} for scrip "{scrip or "all"}" page {page_no}',
+                    "warn",
+                )
                 return []
 
             data = r.json()
@@ -458,7 +478,7 @@ async def _load_candidates(
         hour=23, minute=59, second=59, tzinfo=timezone.utc
     )
 
-    wl = set(watchlist)
+    wl = {str(s).strip() for s in watchlist if str(s).strip()}
     compiled = []
     for t in active_tags:
         try:
@@ -468,79 +488,114 @@ async def _load_candidates(
         except re.error:
             _state.log(f'tag "{t["label"]}" has invalid pattern — skipped', "warn")
 
-    # Always fetch from all scrips (empty string) — no watchlist filtering
-    scrips = [""]
+    scrips = [""] if universe or not watchlist_only else sorted(wl)
+    if not scrips:
+        _state.log("Watchlist mode selected but the watchlist is empty.", "warn")
+        return []
+
     _state.update(totalPages=len(scrips), pagesDone=0)
-    _state.log(f"Fetching BSE feed for all scrips in range {from_date} → {to_date}…")
+    mode_label = "all scrips" if scrips == [""] else f"{len(scrips)} watchlist scrip(s)"
+    _state.log(f"Fetching BSE feed for {mode_label} in range {from_date} → {to_date}…")
 
     out = []
+    seen_ids: set[str] = set()
+    emitted_ids: set[str] = set()
+    max_pages = max(1, int(settings.get("maxPages", 250)))
     for i, scrip in enumerate(scrips):
         if _state.get()["_cancelRequested"]:
             break
 
-        _state.log(f"Fetching scrip {scrip or 'all'} ({i+1}/{len(scrips)})")
-        rows = await _fetch_bse_page(scrip, from_bse, to_bse, settings)
-        s = _state.get()
-        _state.update(
-            recordsScanned=s["recordsScanned"] + len(rows),
-            pagesDone=i + 1,
-        )
+        page_no = 1
+        while page_no <= max_pages:
+            if _state.get()["_cancelRequested"]:
+                break
+
+            _state.log(f"Fetching scrip {scrip or 'all'} page {page_no} ({i+1}/{len(scrips)})")
+            rows = await _fetch_bse_page(scrip, from_bse, to_bse, settings, page_no)
+            s = _state.get()
+            pages_done = s["pagesDone"] + 1
+            _state.update(
+                recordsScanned=s["recordsScanned"] + len(rows),
+                totalPages=max(s["totalPages"], pages_done + (len(scrips) - i - 1)),
+                pagesDone=pages_done,
+            )
+            if not rows:
+                break
+
+            page_keys = {_announcement_key(a) for a in rows}
+            if page_no > 1 and page_keys and page_keys.issubset(seen_ids):
+                _state.log(
+                    f"BSE page {page_no} repeated prior records for scrip {scrip or 'all'} — stopping pagination",
+                    "warn",
+                )
+                break
+
+            seen_ids.update(page_keys)
+
+            for a in rows:
+                scrip_code = str(a.get("SCRIP_CD") or "").strip()
+                if watchlist_only and not universe and wl and scrip_code not in wl:
+                    continue
+
+                dt = _bse_date_to_dt(str(a.get("News_submission_dt") or ""))
+                if dt is None or dt < from_dt or dt > to_dt:
+                    continue
+
+                subject = str(a.get("NEWSSUB") or "")
+                headline = str(a.get("HEADLINE") or a.get("NEWSSUB") or "")
+                ann_id = (
+                    str(a["NEWSID"])
+                    if a.get("NEWSID")
+                    else f"{scrip_code}-{str(a.get('News_submission_dt') or '').replace(' ', '').replace(':', '')}"
+                )
+                if ann_id in emitted_ids:
+                    continue
+
+                matched_tags = []
+                if tags_enabled and compiled:
+                    haystack = f"{subject} {headline}"
+                    for c in compiled:
+                        m = c["re"].search(haystack)
+                        if m:
+                            matched_tags.append(
+                                {"tagId": c["id"], "tagLabel": c["label"], "matchedText": m.group(0)}
+                            )
+                    if not matched_tags:
+                        continue
+
+                raw_attachment = str(a.get("ATTACHMENTNAME") or a.get("NSURL") or "").strip()
+                company_name = str(
+                    a.get("SLONGNAME") or a.get("LONG_NAME") or
+                    a.get("COMPANY_NAME") or a.get("Scrip_Name") or a.get("Scripname") or
+                    a.get("ScripName") or a.get("scrip_name") or a.get("Company") or
+                    a.get("company_name") or ""
+                ).strip()
+
+                out.append(
+                    {
+                        "id": ann_id,
+                        "scripCode": scrip_code,
+                        "companyName": company_name,
+                        "segment": str(a.get("Sgmt") or "Equity"),
+                        "subject": subject,
+                        "headline": headline,
+                        "category": str(a.get("CATEGORYNAME") or ""),
+                        "dtFiled": dt.isoformat(),
+                        "attachmentUrl": _normalize_attachment_url(raw_attachment),
+                        "rawJson": json.dumps(a),
+                        "matchedTags": matched_tags,
+                    }
+                )
+                emitted_ids.add(ann_id)
+
+            page_no += 1
+            await asyncio.sleep(settings.get("rateLimitDelayMs", 1000) / 1000)
 
         stride = max(1, len(scrips) // 20)
         if (i + 1) % stride == 0 or (i + 1) == len(scrips):
             s = _state.get()
             _state.log(
                 f"scrip {i + 1}/{len(scrips)} · scanned={s['recordsScanned']:,}"
-            )
-
-        for a in rows:
-            scrip_code = str(a.get("SCRIP_CD") or "").strip()
-            # Accept all scrips — no watchlist filtering
-
-            dt = _bse_date_to_dt(str(a.get("News_submission_dt") or ""))
-            if dt is None or dt < from_dt or dt > to_dt:
-                continue
-
-            subject = str(a.get("NEWSSUB") or "")
-            headline = str(a.get("HEADLINE") or a.get("NEWSSUB") or "")
-            ann_id = (
-                str(a["NEWSID"])
-                if a.get("NEWSID")
-                else f"{scrip_code}-{str(a.get('News_submission_dt') or '').replace(' ', '').replace(':', '')}"
-            )
-
-            matched_tags = []
-            if tags_enabled and compiled:
-                haystack = f"{subject} {headline}"
-                for c in compiled:
-                    m = c["re"].search(haystack)
-                    if m:
-                        matched_tags.append(
-                            {"tagId": c["id"], "tagLabel": c["label"], "matchedText": m.group(0)}
-                        )
-
-            raw_attachment = str(a.get("ATTACHMENTNAME") or a.get("NSURL") or "").strip()
-            company_name = str(
-                a.get("SLONGNAME") or a.get("LONG_NAME") or
-                a.get("COMPANY_NAME") or a.get("Scrip_Name") or a.get("Scripname") or
-                a.get("ScripName") or a.get("scrip_name") or a.get("Company") or
-                a.get("company_name") or ""
-            ).strip()
-
-            out.append(
-                {
-                    "id": ann_id,
-                    "scripCode": scrip_code,
-                    "companyName": company_name,
-                    "segment": str(a.get("Sgmt") or "Equity"),
-                    "subject": subject,
-                    "headline": headline,
-                    "category": str(a.get("CATEGORYNAME") or ""),
-                    "dtFiled": dt.isoformat(),
-                    "attachmentUrl": _normalize_attachment_url(raw_attachment),
-                    "rawJson": json.dumps(a),
-                    "matchedTags": matched_tags,
-                }
             )
 
         if not universe and i < len(scrips) - 1:
